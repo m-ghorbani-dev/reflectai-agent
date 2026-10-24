@@ -1,0 +1,9 @@
+app:
+  name: ReflectAI
+  max_reflection_rounds: 2
+  history_limit: 100
+defaults:
+  generation_provider: ollama
+  generation_model: llama3.2
+  reflection_provider: ollama
+  reflection_model: llama3.2

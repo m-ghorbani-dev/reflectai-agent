@@ -1,0 +1,7 @@
+providers:
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+  openai:
+    enabled: true
+    base_url: https://api.openai.com/v1

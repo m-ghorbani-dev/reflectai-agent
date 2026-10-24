@@ -1,80 +1,53 @@
 # ReflectAI
 
-**A Multi-Provider AI Agent with Reflection and Iterative Refinement**
+**A multi-provider AI agent with reflection and iterative refinement.**
 
-ReflectAI is an extensible Python project designed to explore AI agents that improve their outputs through iterative reflection and revision. It is being developed to support local language models and online model providers through a unified interface.
+ReflectAI is an experimental Python project that lets you select separate providers and models for generation and reflection. It currently includes a Streamlit interface, Ollama and OpenAI-compatible provider adapters, a bounded review-and-revision loop, local history, and a basic read-only SQL safety layer.
 
 ## Features
+- Independently select generation and reflection providers/models.
+- Use local models through Ollama or an OpenAI-compatible API.
+- Run a bounded reflection and revision workflow.
+- Store recent prompts and answers locally.
+- Inspect provider settings in the UI.
+- Basic SQLite read-only query helper and SQL validation.
 
-- **Multi-Provider Architecture:** Designed to support local and online language models.
-- **Reflection Workflow:** A framework for evaluating and refining generated outputs.
-- **Writing Agent:** Intended for writing tasks with iterative revision.
-- **SQL Agent:** Planned support for generating and refining SQL queries.
-- **Visualization Agent:** Planned support for data visualization workflows.
-- **Streamlit Interface:** A web-based interface for interacting with the project.
-- **Security:** Dedicated modules for SQL policies and execution controls.
-
-## Architecture
-
-```text
-reflectai-agent/
-├── config/          # Application and provider configuration
-├── docs/            # Project documentation
-├── examples/        # Example workflows
-├── src/reflectai/
-│   ├── agents/      # Writing, SQL, and visualization agents
-│   ├── providers/   # Model provider integrations
-│   ├── reflection/  # Evaluation and refinement workflow
-│   ├── security/    # Execution and SQL policies
-│   ├── storage/     # Conversation history
-│   ├── tools/       # SQL and visualization utilities
-│   └── ui/          # Streamlit interface
-├── tests/           # Automated tests
-└── streamlit_app.py # Streamlit entry point
-```
-
-## Requirements
-
-- Python 3.10 or newer
-- pip
-- An existing Python environment
-- Ollama for local model usage, when configured
-
-## Installation
-
-Activate your Python environment, then run:
+## Setup
+Activate your existing Python environment, then run:
 
 ```bash
 pip install -r requirements.txt
 pip install -e .
+cp .env.example .env
 ```
 
-## Configuration
+Edit `.env` only if using an online provider, and set `OPENAI_API_KEY`. Never commit `.env` or real API keys.
 
-Copy `.env.example` to `.env` and configure the environment variables required by your selected provider.
+For Ollama, ensure the Ollama service is running and pull a model, for example:
 
-Never commit API keys, passwords, or other secrets to GitHub.
+```bash
+ollama pull llama3.2
+```
 
-Provider and application settings are stored in the `config/` directory.
-
-## Run the Application
+Run the app:
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-## Development
-
-Run the test suite with:
+Run tests:
 
 ```bash
 pytest
 ```
 
-## Project Status
+## Project status
+This is an early-stage project. SQL and visualization agent modules are initial utilities and are not yet fully integrated into the UI. The SQL validator is a basic guardrail, not a substitute for sandboxing or a complete SQL parser.
 
-ReflectAI is under active development. The current repository establishes the project structure and initial interface. Model integration, reflection workflows, and agent capabilities are being implemented incrementally.
+## Security
+- Do not commit credentials or private data.
+- SQL helper opens SQLite databases in read-only mode and applies a result limit.
+- Do not expose the development app publicly without authentication and security review.
 
 ## License
-
-See the `LICENSE` file.
+See `LICENSE`.
