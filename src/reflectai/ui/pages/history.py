@@ -1,5 +1,5 @@
 import streamlit as st
-from reflectai.storage.history import get_history
+from reflectai.storage.history import get_history, clear_history
 
 def render():
     st.title("History")
@@ -7,6 +7,9 @@ def render():
     if not entries:
         st.info("No saved requests yet.")
         return
+    if st.button("Clear all local history", type="secondary"):
+        clear_history()
+        st.rerun()
     for entry in entries:
         title = entry.get("prompt", "Untitled request").strip().replace("\n", " ")
         with st.expander(title[:90] or "Empty request"):

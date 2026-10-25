@@ -1,3 +1,5 @@
-from .engine import ReflectionResult, run_reflection
+"""Reflection workflow public API."""
+from .engine import run_reflection
+from .schemas import ReflectionResult, Review
 
-__all__ = ["ReflectionResult", "run_reflection"]
+__all__ = ["ReflectionResult", "Review", "run_reflection"]
