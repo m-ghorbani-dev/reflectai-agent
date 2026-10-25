@@ -1,57 +1,80 @@
-"""Interactive, read-only SQLite workspace."""
+"""Interactive, read-only SQLite workspace with query insights and charts."""
 from pathlib import Path
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from reflectai.tools.schema_inspector import inspect_schema
 from reflectai.tools.sql_executor import execute_read_only
 from reflectai.tools.chart_executor import build_chart
 
-def render():
-    st.title("SQLite Workspace")
-    st.caption("Inspect a local SQLite database, run read-only queries, and visualize results.")
-    db_path = st.text_input("SQLite database path", placeholder="/path/to/database.db")
+
+def render() -> None:
+    st.title("فضای کاری SQLite")
+    st.caption("ساختار پایگاه داده را بررسی کن، کوئری فقط‌خواندنی اجرا کن و نتایج را بصری‌سازی کن.")
+    db_path = st.text_input("مسیر فایل SQLite", placeholder="/path/to/database.db", key="rai_sql_db_path")
     if not db_path.strip():
-        st.info("Enter the path to a local SQLite database to get started.")
+        st.info("برای شروع، مسیر یک فایل SQLite محلی را وارد کن.")
         return
     path = Path(db_path).expanduser()
     if not path.is_file():
-        st.warning("The selected path is not an existing file.")
+        st.warning("فایل انتخاب‌شده وجود ندارد یا مسیر معتبر نیست.")
         return
     try:
         schema = inspect_schema(path)
     except Exception as exc:
-        st.error(f"Could not inspect database: {exc}")
+        st.error(f"خواندن ساختار پایگاه داده ناموفق بود: {exc}")
         return
-    with st.expander("Database schema", expanded=True):
-        if schema:
-            st.json(schema)
-        else:
-            st.info("No user tables were found in this database.")
-    query = st.text_area("Read-only SQL query", value="SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", height=120)
-    row_limit = st.slider("Maximum rows", 1, 5000, 500)
-    timeout = st.slider("Time limit (seconds)", 1, 30, 3)
-    if st.button("Run query", type="primary", disabled=not query.strip()):
+
+    table_count = len(schema) if isinstance(schema, (dict, list)) else 0
+    c1, c2 = st.columns(2)
+    with c1: st.metric("جداول شناسایی‌شده", table_count)
+    with c2: st.metric("وضعیت فایل", "آمادهٔ خواندن")
+    with st.expander("ساختار پایگاه داده", expanded=False):
+        if schema: st.json(schema)
+        else: st.info("جدول کاربری پیدا نشد.")
+
+    st.markdown("### اجرای کوئری")
+    query = st.text_area("کوئری SQL فقط‌خواندنی", value="SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name", height=130, key="rai_sql_query")
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1: row_limit = st.select_slider("حداکثر ردیف", options=[100, 250, 500, 1000, 2500, 5000], value=500)
+    with c2: timeout = st.slider("مهلت (ثانیه)", 1, 30, 3)
+    with c3: st.caption("برای محافظت از داده‌ها، اجرای نوشتن/تغییر داده در این فضا مجاز نیست.")
+    if st.button("▶ اجرای کوئری", type="primary", disabled=not query.strip(), use_container_width=True):
         try:
             columns, rows = execute_read_only(path, query, limit=row_limit, timeout_seconds=timeout)
-            frame = pd.DataFrame(rows, columns=columns)
-            st.session_state["reflectai_sql_result"] = frame
-            st.success(f"Query returned {len(frame)} row(s). Results are capped at {row_limit} rows.")
+            st.session_state["reflectai_sql_result"] = pd.DataFrame(rows, columns=columns)
+            st.session_state["reflectai_sql_query_text"] = query
+            st.success(f"کوئری اجرا شد؛ {len(rows)} ردیف بازگشت داده شد.")
         except Exception as exc:
-            st.error(f"Query failed: {exc}")
+            st.error(f"اجرای کوئری ناموفق بود: {exc}")
+
     frame = st.session_state.get("reflectai_sql_result")
     if isinstance(frame, pd.DataFrame):
-        st.subheader("Query results")
-        st.dataframe(frame, use_container_width=True)
-        if len(frame.columns):
-            st.download_button("Download CSV", frame.to_csv(index=False).encode("utf-8"), "reflectai-query-results.csv", "text/csv")
-        if len(frame.columns) >= 1:
-            st.subheader("Visualize results")
-            chart_type = st.selectbox("Chart type", ["bar", "line", "scatter", "histogram"])
-            x_col = st.selectbox("X column", list(frame.columns))
-            y_options = [c for c in frame.columns if c != x_col]
-            y_col = st.selectbox("Y column", y_options) if chart_type != "histogram" and y_options else None
-            if st.button("Build chart", disabled=(chart_type != "histogram" and y_col is None)):
-                try:
-                    st.plotly_chart(build_chart(frame, chart_type, x_col, y_col), use_container_width=True)
-                except Exception as exc:
-                    st.error(f"Could not create chart: {exc}")
+        st.markdown("### نتایج")
+        a, b, c = st.columns(3)
+        with a: st.metric("ردیف‌ها", len(frame))
+        with b: st.metric("ستون‌ها", len(frame.columns))
+        with c: st.download_button("⬇ دریافت CSV", frame.to_csv(index=False).encode("utf-8-sig"), "reflectai-query-results.csv", "text/csv", use_container_width=True)
+        tab_data, tab_chart, tab_query = st.tabs(["جدول داده‌ها", "نمودار", "کوئری اجراشده"])
+        with tab_data:
+            st.dataframe(frame, use_container_width=True, hide_index=True)
+        with tab_chart:
+            if len(frame.columns) and len(frame):
+                chart_type = st.selectbox("نوع نمودار", ["bar", "line", "scatter", "histogram"], key="rai_sql_chart_type")
+                x_col = st.selectbox("ستون محور X", list(frame.columns), key="rai_sql_x_col")
+                y_options = [column for column in frame.columns if column != x_col]
+                y_col = st.selectbox("ستون محور Y", y_options, key="rai_sql_y_col") if chart_type != "histogram" and y_options else None
+                if st.button("ساخت نمودار", key="rai_sql_build_chart", disabled=(chart_type != "histogram" and y_col is None)):
+                    try:
+                        fig = build_chart(frame, chart_type, x_col, y_col)
+                        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                        st.session_state["reflectai_sql_chart"] = fig
+                    except Exception as exc:
+                        st.error(f"ساخت نمودار ناموفق بود: {exc}")
+                chart = st.session_state.get("reflectai_sql_chart")
+                if chart is not None:
+                    st.plotly_chart(chart, use_container_width=True, config={"displayModeBar": True})
+            else:
+                st.info("برای نمودار، کوئری باید داده و دست‌کم یک ستون برگرداند.")
+        with tab_query:
+            st.code(st.session_state.get("reflectai_sql_query_text", query), language="sql")

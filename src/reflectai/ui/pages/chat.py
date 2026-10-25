@@ -50,7 +50,7 @@ def _render_trace(trace: list[dict]) -> None:
             stage_label = labels.get(item.get("stage"), item.get("stage", "Step"))
             with col:
                 st.markdown(
-                    f"<div style='border:1px solid #cbd5e1;border-radius:10px;padding:12px;min-height:78px'>"
+                    f"<div class='rai-trace-card'>"
                     f"<strong>{stage_label}</strong><br>"
                     f"<small>Round {item.get('round', 0)} · {item.get('model', '')}</small></div>",
                     unsafe_allow_html=True,
@@ -212,6 +212,7 @@ def _render_running_task():
                         "reflection_provider": current["rev_provider"], "reflection_model": current["rev_model"],
                         "rounds": result.rounds, "trace": result.trace,
                         "context_len": current["context_len"], "max_tokens": current["max_tokens"],
+                        "duration_seconds": max(0.0, time.time() - current["started_at"]),
                     })
                     current["saved"] = True
             else:
@@ -220,8 +221,23 @@ def _render_running_task():
         if events:
             st.markdown("### مراحل زندهٔ اجرای مدل")
             total = max(1, 1 + 2 * current["max_rounds"])
-            done = sum(1 for event in events if event.get("event") == "complete")
-            st.progress(min(1.0, done / total), text=f"مراحل تکمیل‌شده: {done} از حداکثر {total}")
+            done_events = [event for event in events if event.get("event") == "complete"]
+            done = len(done_events)
+            progress = min(1.0, done / total)
+            durations = []
+            starts = {}
+            for event in events:
+                event_key = (event.get("stage"), event.get("round", 0))
+                if event.get("event") == "start":
+                    starts[event_key] = event.get("time")
+                elif event.get("event") == "complete" and event_key in starts and event.get("time"):
+                    durations.append(max(0.0, event["time"] - starts[event_key]))
+            avg_step = sum(durations) / len(durations) if durations else None
+            eta = int(avg_step * max(0, total - done)) if avg_step is not None else None
+            progress_label = f"پیشرفت مراحل: {int(progress * 100)}٪ · {done} از حداکثر {total} مرحله"
+            if eta is not None and status == "running":
+                progress_label += f" · زمان باقی‌ماندهٔ تخمینی: حدود {eta} ثانیه"
+            st.progress(progress, text=progress_label)
             labels = {"generation": "تولید پاسخ اولیه", "reflection": "بازبینی پاسخ", "revision": "اصلاح پاسخ"}
             for idx, event in enumerate(events, 1):
                 title = labels.get(event.get("stage"), event.get("stage", "مرحله"))
@@ -248,8 +264,7 @@ def _render_running_task():
 
 
 def render():
-    _install_persian_rtl()
-    st.title("🔁 گفت‌وگو با ReflectAI")
+    st.title("گفت‌وگو با ReflectAI")
     st.caption("تولید، بازبینی و اصلاح پاسخ با کنترل منابع و مشاهدهٔ مراحل واقعی تبادل با مدل‌ها.")
 
     with st.sidebar:

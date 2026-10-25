@@ -182,3 +182,9 @@ MIT. See `LICENSE`.
 Run the application with `./run_reflectai.sh` after activating your project environment. Press `Ctrl+C` in that terminal to stop Streamlit; the launcher attempts to unload any models still resident in Ollama. If the browser tab is simply closed, the server process continues until you stop it in the terminal.
 
 The Chat page includes a Stop button, a configurable Ollama context length (`num_ctx`), a maximum output-token setting (`num_predict` for Ollama), and an option to unload models after requests. Lower context/output limits can reduce memory use. The manual “Free Ollama model memory” action unloads models without stopping a separately managed Ollama service.
+
+## Dark dashboard and resource controls
+
+The Streamlit interface uses a dark-only theme configured in `.streamlit/config.toml`. Navigation includes an overview dashboard, chat with an inspectable reflection trace, system/Ollama resource monitor, read-only SQLite workspace, model settings, local history, and About.
+
+The resource monitor reads Linux RAM/CPU data from `/proc` and optionally NVIDIA GPU/VRAM data from `nvidia-smi`. It refreshes on request rather than polling continuously. Ollama model unloading is separate from stopping the Ollama service; stopping the service affects every application connected to that daemon and may require system permissions.
