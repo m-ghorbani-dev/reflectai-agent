@@ -67,10 +67,11 @@ def _stop_ollama_service() -> tuple[bool, str]:
         return False, f'اجرای دستور توقف ممکن نشد: {exc}'
 
 
-def render() -> None:
+def _render_resources() -> None:
     st.title("مانیتور منابع و Ollama")
-    st.caption("مانیتورینگ کم‌مصرف و دستی؛ اطلاعات سخت‌افزاری فقط در صورت در دسترس بودن ابزار سیستم نمایش داده می‌شوند.")
-    if st.button("↻ خواندن دوبارهٔ وضعیت", type="primary"):
+    st.caption("پایش زندهٔ کم‌مصرف؛ اطلاعات هر ۲ ثانیه به‌روزرسانی می‌شوند. ابزارهای سخت‌افزاری فقط در صورت دسترس‌پذیری نمایش داده می‌شوند.")
+    st.caption(f"آخرین نمونه‌برداری: {time.strftime('%H:%M:%S')}")
+    if st.button("↻ خواندن دوبارهٔ وضعیت", type="primary", key="resources_manual_refresh"):
         st.rerun()
     metrics = read_system_metrics()
     c1, c2, c3 = st.columns(3)
@@ -118,3 +119,12 @@ def render() -> None:
 
     st.markdown("### نحوهٔ خواندن شاخص‌ها")
     st.caption("RAM و CPU از اطلاعات لینوکس خوانده می‌شوند. GPU/VRAM فقط با nvidia-smi و درایور سازگار نمایش داده می‌شود. این صفحه خودکار و پرتکرار refresh نمی‌شود تا مصرف منابع اضافی ایجاد نکند.")
+
+
+@st.fragment(run_every="2s")
+def _resources_live_fragment() -> None:
+    _render_resources()
+
+
+def render() -> None:
+    _resources_live_fragment()

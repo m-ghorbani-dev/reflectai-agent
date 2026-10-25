@@ -8,6 +8,7 @@ from reflectai.config import provider_settings, app_settings
 from reflectai.providers.registry import list_models
 from reflectai.reflection.engine import run_reflection
 from reflectai.storage.history import add_entry
+from reflectai.storage.answers import save_final_answer
 
 
 def _set_chat_prompt(prompt: str) -> None:
@@ -205,15 +206,36 @@ def _render_running_task():
                 st.subheader("پاسخ نهایی")
                 st.markdown(result.answer)
                 st.caption(f"دورهای بازبینی: {result.rounds}")
+                if current.get("answer_file"):
+                    from pathlib import Path
+                    answer_path = Path(current["answer_file"])
+                    if answer_path.is_file():
+                        st.success(f"پاسخ نهایی در فایل ذخیره شد: {answer_path.name}")
+                        st.download_button(
+                            "⬇ دانلود پاسخ نهایی (Markdown)",
+                            data=answer_path.read_bytes(),
+                            file_name=answer_path.name,
+                            mime="text/markdown",
+                            key="download_final_answer",
+                        )
+                elif current.get("save_error"):
+                    st.warning(f"پاسخ در تاریخچه ذخیره شد، اما ذخیرهٔ فایل جداگانه ناموفق بود: {current['save_error']}")
                 _render_trace(result.trace)
                 if not current.get("saved"):
-                    add_entry(current["prompt"], result.answer, {
+                    metadata = {
                         "generation_provider": current["gen_provider"], "generation_model": current["gen_model"],
                         "reflection_provider": current["rev_provider"], "reflection_model": current["rev_model"],
                         "rounds": result.rounds, "trace": result.trace,
                         "context_len": current["context_len"], "max_tokens": current["max_tokens"],
                         "duration_seconds": max(0.0, time.time() - current["started_at"]),
-                    })
+                    }
+                    try:
+                        answer_path = save_final_answer(current["prompt"], result.answer, metadata)
+                        metadata["answer_file"] = str(answer_path)
+                        current["answer_file"] = str(answer_path)
+                    except Exception as exc:
+                        current["save_error"] = str(exc)
+                    add_entry(current["prompt"], result.answer, metadata)
                     current["saved"] = True
             else:
                 st.success("کار تمام شد.")

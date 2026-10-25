@@ -5,9 +5,9 @@ from reflectai.providers.registry import list_models
 from reflectai.providers.ollama import OllamaProvider
 
 
-def render() -> None:
+def _render_model_settings() -> None:
     st.title("تنظیمات مدل و اجرا")
-    st.caption("تنظیمات پایدار پروژه در YAML و تنظیمات هر درخواست در صفحهٔ گفت‌وگو نگهداری می‌شوند.")
+    st.caption(f"اطلاعات مدل‌ها به‌صورت خودکار به‌روزرسانی می‌شود · آخرین بررسی: {__import__('time').strftime('%H:%M:%S')}")
     providers = provider_settings().get("providers", {})
     defaults = app_settings().get("defaults", {})
     app = app_settings().get("app", {})
@@ -54,3 +54,12 @@ def render() -> None:
                 st.success(f"درخواست تخلیه ارسال شد: {', '.join(names) if names else 'مدلی بارگذاری نشده بود.'}")
             except Exception as exc:
                 st.error(str(exc))
+
+
+@st.fragment(run_every="5s")
+def _model_settings_live_fragment() -> None:
+    _render_model_settings()
+
+
+def render() -> None:
+    _model_settings_live_fragment()

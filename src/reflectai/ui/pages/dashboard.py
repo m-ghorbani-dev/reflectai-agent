@@ -12,7 +12,7 @@ def _metric(label: str, value: str, note: str = "") -> None:
     st.metric(label, value, help=note or None)
 
 
-def render() -> None:
+def _render_dashboard() -> None:
     st.title("ReflectAI · Overview")
     st.caption("نمای کلی فعالیت مدل‌ها، اجرای Reflection و وضعیت منابع سیستم")
     if st.button("↻ به‌روزرسانی وضعیت", key="dashboard_refresh"):
@@ -89,3 +89,12 @@ def render() -> None:
             with st.expander(prompt[:100] or "درخواست بدون عنوان"):
                 st.caption(entry.get("timestamp", ""))
                 st.markdown(entry.get("answer", ""))
+
+
+@st.fragment(run_every="2s")
+def _dashboard_live_fragment() -> None:
+    _render_dashboard()
+
+
+def render() -> None:
+    _dashboard_live_fragment()

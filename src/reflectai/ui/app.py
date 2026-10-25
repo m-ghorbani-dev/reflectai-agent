@@ -23,6 +23,7 @@ def main() -> None:
             key="rai_navigation",
         )
         st.divider()
+        _sidebar_live_status()
         st.markdown("<div class='rai-sidebar-footer'><span class='rai-live-dot'></span> رابط تیره · محلی</div>", unsafe_allow_html=True)
 
     routes = {
