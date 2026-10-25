@@ -1,8 +1,11 @@
 """Chat page with model discovery and inspectable reflection trace."""
 import streamlit as st
+import threading
 import time
+from reflectai.providers.ollama import OllamaProvider
+from reflectai.exceptions import GenerationCancelled
 from reflectai.config import provider_settings, app_settings
-from reflectai.providers.registry import list_models, unload_ollama_models
+from reflectai.providers.registry import list_models
 from reflectai.reflection.engine import run_reflection
 from reflectai.storage.history import add_entry
 
@@ -82,104 +85,56 @@ def _render_trace(trace: list[dict]) -> None:
 def _install_persian_rtl() -> None:
     st.markdown("""
     <style>
-    /* Improve Persian readability while preserving code and model prompts as LTR. */
+    :root { --rai-ink:#e8eef8; --rai-muted:#9eacc2; --rai-panel:#111c2f; --rai-line:#293b56; --rai-accent:#7c9cff; }
+    .stApp { background: radial-gradient(ellipse at top right, #1b2a48 0%, #0b1220 50%, #080d17 100%); }
+    .block-container { max-width: 1450px; padding-top: 1.8rem; padding-bottom: 3rem; }
+    [data-testid="stSidebar"] { background: #0b1322; border-left: 1px solid var(--rai-line); }
+    h1, h2, h3 { letter-spacing: -.02em; }
     .stApp [data-testid="stMarkdownContainer"] p,
     .stApp [data-testid="stMarkdownContainer"] li,
-    .stApp [data-testid="stCaptionContainer"],
-    .stApp label,
+    .stApp [data-testid="stCaptionContainer"], .stApp label,
     .stApp [data-testid="stAlert"] { direction: rtl; text-align: right; }
-    .stApp textarea { direction: rtl !important; text-align: right !important; }
-    .stApp input { direction: rtl; text-align: right; }
-    .stApp pre, .stApp code { direction: ltr; text-align: left; }
+    .stApp textarea, .stApp input { direction: rtl !important; text-align: right !important; }
+    .stApp pre, .stApp code { direction: ltr !important; text-align: left !important; }
+    div[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--rai-line); border-radius: 16px; }
+    .stButton > button { border-radius: 10px; border: 1px solid #344969; transition: all .15s ease; }
+    .stButton > button:hover { border-color: var(--rai-accent); color: white; }
+    .stButton > button[kind="primary"] { background: linear-gradient(100deg,#536dfe,#8b5cf6); border: 0; }
+    div[data-testid="stMetric"] { background: #111c2f; padding: 12px 16px; border: 1px solid var(--rai-line); border-radius: 12px; }
     </style>
     """, unsafe_allow_html=True)
 
-
-def _format_duration(seconds: float) -> str:
-    seconds = max(0, int(seconds))
-    if seconds < 60:
-        return f"حدود {seconds} ثانیه"
-    minutes, remaining = divmod(seconds, 60)
-    return f"حدود {minutes} دقیقه و {remaining} ثانیه"
-
-
-def _live_progress_panel(max_rounds: int):
-    """Show stage progress and a rough ETA while each model call runs."""
+def _live_progress_panel():
+    """Return a callback that displays each completed model turn as it happens."""
     panel = st.empty()
     events = []
-    completed_durations = []
-    active_started = None
-    active_title = None
-    started_at = time.monotonic()
-    expected_calls = max(1, 1 + 2 * max_rounds)
-    completed_calls = 0
     labels = {"generation": "تولید پاسخ اولیه", "reflection": "ارزیابی پاسخ", "revision": "اصلاح پاسخ"}
 
     def update(event: dict) -> None:
-        nonlocal active_started, active_title, completed_calls
-        if event.get("event") == "workflow_complete":
-            elapsed = time.monotonic() - started_at
-            with panel.container():
-                st.markdown("### ✅ فرایند کامل شد")
-                st.progress(1.0, text="پیشرفت: ۱۰۰٪")
-                st.caption(f"زمان کل اجرا: {_format_duration(elapsed)}")
-                for item in events:
-                    icon = "✅" if item["status"] == "تکمیل شد" else "⏭️"
-                    with st.expander(f"{icon} {item['title']} · {item['model']}", expanded=False):
-                        st.markdown(f"**وضعیت:** {item['status']}")
-                        if item.get("system_prompt"):
-                            st.markdown("**پرامپت سیستمی**")
-                            st.code(item["system_prompt"], language="text")
-                        if item.get("prompt"):
-                            st.markdown("**پرامپت ارسالی**")
-                            st.code(item["prompt"], language="text")
-                        if item.get("response") is not None:
-                            st.markdown("**پاسخ مدل**")
-                            st.markdown(item["response"] or "مدل پاسخ متنی برنگرداند.")
-            return
-
         stage = event.get("stage", "step")
         round_no = event.get("round", 0)
         title = labels.get(stage, stage)
         if stage in ("reflection", "revision"):
             title += f" — دور {round_no}"
-        now = time.monotonic()
         if event.get("event") == "start":
-            active_started = now
-            active_title = title
             events.append({"title": title, "status": "در حال اجرا", "model": event.get("model", ""),
                            "prompt": event.get("prompt", ""), "system_prompt": event.get("system_prompt", ""), "response": None})
         else:
             found = next((item for item in reversed(events) if item["title"] == title and item["response"] is None), None)
             if found is None:
-                found = {"title": title, "status": "در حال اجرا", "model": event.get("model", ""),
+                found = {"title": title, "status": "تکمیل شد", "model": event.get("model", ""),
                          "prompt": event.get("prompt", ""), "system_prompt": event.get("system_prompt", ""), "response": None}
                 events.append(found)
             found.update(status="تکمیل شد", response=event.get("response", ""))
-            if active_started is not None:
-                completed_durations.append(max(0.1, now - active_started))
-            completed_calls += 1
-            active_started = None
-            active_title = None
-
-        elapsed = now - started_at
-        average_call = sum(completed_durations) / len(completed_durations) if completed_durations else 15.0
-        active_elapsed = now - active_started if active_started is not None else 0
-        # ETA is intentionally approximate: model latency and early approval vary.
-        remaining_calls = max(0, expected_calls - completed_calls - (1 if active_started is not None else 0))
-        estimated_remaining = (max(0, average_call - active_elapsed) if active_started is not None else 0) + remaining_calls * average_call
-        progress_fraction = min(0.97, (completed_calls + (0.5 if active_started is not None else 0)) / expected_calls)
         with panel.container():
             st.markdown("### 🔄 مراحل زندهٔ گفتگو بین مدل‌ها")
-            st.progress(progress_fraction, text=f"پیشرفت تقریبی: {int(progress_fraction * 100)}٪")
-            st.caption(f"زمان سپری‌شده: {_format_duration(elapsed)} · زمان باقی‌ماندهٔ تخمینی: { _format_duration(estimated_remaining) }")
-            st.caption("زمان باقی‌مانده تقریبی است و بسته به سرعت مدل و تأیید زودهنگام پاسخ تغییر می‌کند.")
+            st.caption("هر مرحله پس از دریافت پاسخ مدل نمایش داده می‌شود؛ زمان انتظار نیز مشخص است.")
             for item in events:
                 icon = "⏳" if item["status"] == "در حال اجرا" else "✅"
                 with st.expander(f"{icon} {item['title']} · {item['model']}", expanded=item["status"] == "در حال اجرا"):
                     st.markdown(f"**وضعیت:** {item['status']}")
                     if item.get("system_prompt"):
-                        st.markdown("**پرامپت سیستمی**")
+                        st.markdown("**System prompt**")
                         st.code(item["system_prompt"], language="text")
                     if item.get("prompt"):
                         st.markdown("**پرامپت ارسالی**")
@@ -190,77 +145,186 @@ def _live_progress_panel(max_rounds: int):
     return update
 
 
+def _run_task(task: dict, prompt: str, gen_provider: str, gen_model: str,
+              rev_provider: str, rev_model: str, max_rounds: int,
+              context_len: int, max_tokens: int, unload_after: bool) -> None:
+    try:
+        from reflectai.reflection.engine import run_reflection
+        result = run_reflection(
+            prompt, gen_provider, gen_model, rev_provider, rev_model, max_rounds,
+            progress_callback=lambda event: task["events"].append({**event, "time": time.time()}),
+            context_len=context_len, max_tokens=max_tokens,
+            cancel_event=task["cancel_event"], unload_after=unload_after,
+        )
+        task["result"] = result
+        task["status"] = "cancelled" if task["cancel_event"].is_set() else "complete"
+    except GenerationCancelled:
+        task["status"] = "cancelled"
+    except Exception as exc:
+        task["error"] = str(exc)
+        task["status"] = "error"
+    finally:
+        task["finished_at"] = time.time()
+        if unload_after:
+            # Also release any model left resident after a cancelled stream.
+            try:
+                OllamaProvider().unload_all()
+            except Exception:
+                pass
+
+
+def _render_running_task():
+    task = st.session_state.get("reflectai_task")
+    if not task:
+        return
+
+    @st.fragment(run_every="1s")
+    def task_monitor():
+        current = st.session_state.get("reflectai_task")
+        if not current:
+            return
+        status = current["status"]
+        started = current["started_at"]
+        elapsed = max(0, int(time.time() - started))
+        if status == "running":
+            st.warning(f"در حال اجرا — زمان سپری‌شده: {elapsed} ثانیه")
+            if st.button("⏹ توقف فوری تولید", type="secondary", key="cancel_reflectai_run", use_container_width=True):
+                current["cancel_event"].set()
+                current["status"] = "cancelling"
+                st.rerun()
+        elif status == "cancelling":
+            st.info("درخواست توقف ارسال شد؛ اتصال تولید در حال بسته‌شدن است…")
+        elif status == "cancelled":
+            st.warning("تولید متوقف شد. در صورت فعال بودن گزینهٔ تخلیه، مدل از حافظه آزاد می‌شود.")
+        elif status == "error":
+            st.error(f"اجرای مدل با خطا متوقف شد: {current.get('error', 'Unknown error')}")
+        elif status == "complete":
+            result = current.get("result")
+            if result:
+                st.success(f"پاسخ آماده شد · زمان اجرا: {elapsed} ثانیه")
+                st.subheader("پاسخ نهایی")
+                st.markdown(result.answer)
+                st.caption(f"دورهای بازبینی: {result.rounds}")
+                _render_trace(result.trace)
+                if not current.get("saved"):
+                    add_entry(current["prompt"], result.answer, {
+                        "generation_provider": current["gen_provider"], "generation_model": current["gen_model"],
+                        "reflection_provider": current["rev_provider"], "reflection_model": current["rev_model"],
+                        "rounds": result.rounds, "trace": result.trace,
+                        "context_len": current["context_len"], "max_tokens": current["max_tokens"],
+                    })
+                    current["saved"] = True
+            else:
+                st.success("کار تمام شد.")
+        events = list(current.get("events", []))
+        if events:
+            st.markdown("### مراحل زندهٔ اجرای مدل")
+            total = max(1, 1 + 2 * current["max_rounds"])
+            done = sum(1 for event in events if event.get("event") == "complete")
+            st.progress(min(1.0, done / total), text=f"مراحل تکمیل‌شده: {done} از حداکثر {total}")
+            labels = {"generation": "تولید پاسخ اولیه", "reflection": "بازبینی پاسخ", "revision": "اصلاح پاسخ"}
+            for idx, event in enumerate(events, 1):
+                title = labels.get(event.get("stage"), event.get("stage", "مرحله"))
+                if event.get("round"):
+                    title += f" — دور {event['round']}"
+                icon = "⏳" if event.get("event") == "start" else "✅"
+                with st.expander(f"{icon} {idx}. {title} · {event.get('model', '')}", expanded=event.get("event") == "start"):
+                    st.caption(f"{event.get('provider', '')} / {event.get('model', '')}")
+                    if event.get("system_prompt"):
+                        st.markdown("**System prompt**")
+                        st.code(event["system_prompt"], language="text")
+                    if event.get("prompt"):
+                        st.markdown("**پرامپت ارسالی**")
+                        st.code(event["prompt"], language="text")
+                    if event.get("response") is not None:
+                        st.markdown("**پاسخ مدل**")
+                        st.code(event["response"], language="text")
+        if status in ("complete", "cancelled", "error"):
+            if st.button("پاک‌کردن وضعیت اجرا", key="clear_reflectai_task"):
+                st.session_state.pop("reflectai_task", None)
+                st.rerun()
+
+    task_monitor()
+
+
 def render():
     _install_persian_rtl()
-    st.title("گفت‌وگو با ReflectAI")
-    st.caption("با مدل‌های انتخاب‌شده پاسخ تولید کن، آن را ارزیابی کن و بهبود بده.")
+    st.title("🔁 گفت‌وگو با ReflectAI")
+    st.caption("تولید، بازبینی و اصلاح پاسخ با کنترل منابع و مشاهدهٔ مراحل واقعی تبادل با مدل‌ها.")
+
+    with st.sidebar:
+        st.markdown("### ⚙️ کنترل منابع Ollama")
+        st.caption("بستن تب مرورگر، سرور Ollama را متوقف نمی‌کند. این کنترل‌ها مدل‌های بارگذاری‌شده را تخلیه می‌کنند.")
+        if st.button("🧹 آزادسازی حافظهٔ مدل‌ها", use_container_width=True, key="unload_ollama_models"):
+            try:
+                released = OllamaProvider().unload_all()
+                st.success("درخواست تخلیه ارسال شد: " + (", ".join(released) if released else "مدلی در حافظه نبود."))
+            except Exception as exc:
+                st.error(f"ارتباط با Ollama برقرار نشد: {exc}")
+
+    active_task = st.session_state.get("reflectai_task")
+    if active_task and active_task.get("status") in ("running", "cancelling"):
+        _render_running_task()
+        return
+
     providers = [k for k, v in provider_settings().get("providers", {}).items() if v.get("enabled")]
     if not providers:
         st.error("No enabled providers found in config/providers.yaml")
         return
-    left, right = st.columns(2)
+    left, right = st.columns(2, gap="large")
     with left:
-        gen_provider = st.selectbox("Generation provider", providers, key="gen_provider")
+        gen_provider = st.selectbox("مدل تولید پاسخ", providers, key="gen_provider")
         gen_model = _model_picker("Generation model", gen_provider, "gen_model")
     with right:
-        rev_provider = st.selectbox("Reflection provider", providers, key="rev_provider")
+        rev_provider = st.selectbox("مدل بازبینی", providers, key="rev_provider")
         rev_model = _model_picker("Reflection model", rev_provider, "rev_model")
-    max_rounds = st.slider("Maximum reflection rounds", 0, 5, int(app_settings().get("app", {}).get("max_reflection_rounds", 2)))
 
-    with st.expander("مدیریت منابع Ollama", expanded=False):
-        st.caption("Ollama ممکن است مدل‌ها را پس از پایان درخواست در RAM/VRAM نگه دارد. این دکمه مدل‌های بارگذاری‌شده را از حافظه خارج می‌کند؛ خود سرویس Ollama روشن می‌ماند.")
-        if st.button("آزادسازی حافظهٔ مدل‌های Ollama", key="unload_ollama_models"):
-            try:
-                unloaded = unload_ollama_models()
-                if unloaded:
-                    st.success("مدل‌های خارج‌شده از حافظه: " + ", ".join(unloaded))
-                else:
-                    st.info("مدلی در حال اجرا نبود؛ حافظه‌ای برای آزادسازی از طرف Ollama پیدا نشد.")
-            except Exception as exc:
-                st.error(f"آزادسازی مدل‌ها ناموفق بود: {exc}")
+    with st.expander("تنظیمات پیشرفتهٔ تولید و مصرف حافظه", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            context_len = st.select_slider("Context length (توکن ورودی)", options=[512, 1024, 2048, 4096, 8192, 16384, 32768], value=4096,
+                                           help="برای مصرف کمتر RAM/VRAM مقدار کوچک‌تری انتخاب کن.")
+        with c2:
+            max_tokens = st.slider("حداکثر توکن خروجی", min_value=128, max_value=4096, value=1024, step=128,
+                                   help="حد بالای طول پاسخ هر فراخوانی مدل؛ برای پاسخ کوتاه‌تر کاهش بده.")
+        with c3:
+            max_rounds = st.slider("حداکثر دور بازبینی", 0, 5, int(app_settings().get("app", {}).get("max_reflection_rounds", 2)))
+        unload_after = st.checkbox("پس از هر پاسخ، مدل Ollama از حافظه تخلیه شود", value=True,
+                                   help="مصرف پایدار حافظه کمتر می‌شود، اما برای هر دور ممکن است مدل دوباره بارگذاری شود.")
 
-    # Clickable examples make it easier to try the app without writing a prompt first.
     examples = [
-        ("توضیح یک مفهوم", "بیش‌برازش (Overfitting) در یادگیری ماشین چیست؟ با یک مثال ساده از زندگی واقعی توضیح بده و سه روش عملی برای کاهش آن ارائه کن."),
-        ("بررسی کد پایتون", "یک تابع پایتون بنویس که بررسی کند آیا یک رشته از دو طرف یکسان خوانده می‌شود یا نه (Palindrome). حالت‌های مرزی را در نظر بگیر، سپس کد را از نظر خطا بررسی کن و در صورت نیاز بهبود بده."),
-        ("مقایسهٔ دو روش", "لیست (list) و تاپل (tuple) در پایتون را مقایسه کن. برای هرکدام مثال بزن، توضیح بده چه زمانی باید از آن استفاده کرد و در پایان درستی فنی مقایسه را بررسی کن."),
-        ("ساخت برنامهٔ یادگیری", "یک برنامهٔ ۷ روزه برای فرد مبتدی طراحی کن تا SQL را یاد بگیرد. برای هر روز هدف، یک تمرین کوتاه و روشی برای سنجش پیشرفت مشخص کن."),
-        ("آزمایش ارزیابی انتقادی", "فردی می‌گوید: «همبستگی همیشه رابطهٔ علت و معلولی را ثابت می‌کند.» این ادعا را ارزیابی کن، اشکال آن را توضیح بده و یک مثال نقض روشن ارائه کن."),
+        ("توضیح یک مفهوم", "بیش‌برازش (Overfitting) در یادگیری ماشین چیست؟ با یک مثال ساده توضیح بده و سه روش کاهش آن را فهرست کن."),
+        ("بررسی کد پایتون", "تابعی در پایتون بنویس که بررسی کند رشته palindrome است یا نه. کد را کوتاه نگه دار، حالت‌های مرزی را در نظر بگیر و یک تست نمونه ارائه کن."),
+        ("مقایسهٔ دو روش", "لیست (list) و تاپل (tuple) در پایتون را در یک جدول کوتاه مقایسه کن و برای هرکدام یک مثال بزن."),
+        ("برنامهٔ یادگیری", "یک برنامهٔ ۷ روزه برای یادگیری SQL بنویس؛ برای هر روز فقط هدف و یک تمرین کوتاه ذکر کن."),
+        ("ارزیابی انتقادی", "این ادعا را بررسی کن: «همبستگی همیشه رابطهٔ علت و معلولی را ثابت می‌کند.» پاسخ کوتاه، دقیق و همراه با یک مثال نقض باشد."),
     ]
     prompt_col, examples_col = st.columns([2, 1], gap="large")
     with prompt_col:
-        prompt = st.text_area(
-            "پرامپت شما", height=220,
-            placeholder="درخواست خود را بنویس یا یکی از نمونه‌های سمت راست را انتخاب کن.",
-            key="chat_prompt",
-        )
+        prompt = st.text_area("پرامپت شما", height=210, placeholder="درخواست خود را بنویس یا نمونه‌ای را از سمت راست انتخاب کن.", key="chat_prompt")
     with examples_col:
-        st.markdown("#### نمونه‌پرامپت‌های آماده")
-        st.caption("یک نمونه را انتخاب کن تا متن آن در کادر پرامپت قرار بگیرد؛ پیش از اجرا می‌توانی آن را ویرایش کنی.")
+        st.markdown("#### ✨ نمونه‌پرامپت‌های آماده")
+        st.caption("برای قرار دادن نمونه در کادر کلیک کن.")
         for example_index, (example_label, example_prompt) in enumerate(examples):
-            st.button(
-                example_label,
-                key=f"sample_prompt_{example_index}",
-                use_container_width=True,
-                on_click=_set_chat_prompt,
-                args=(example_prompt,),
-            )
+            st.button(example_label, key=f"sample_prompt_{example_index}", use_container_width=True,
+                      on_click=_set_chat_prompt, args=(example_prompt,))
 
-    if st.button("تولید پاسخ و بازبینی", type="primary", disabled=not prompt.strip()):
-        try:
-            progress_callback = _live_progress_panel(max_rounds)
-            result = run_reflection(prompt, gen_provider, gen_model, rev_provider, rev_model, max_rounds, progress_callback=progress_callback)
-            progress_callback({"event": "workflow_complete"})
-            st.subheader("پاسخ نهایی")
-            st.markdown(result.answer)
-            st.caption(f"تعداد دورهای بازبینی: {result.rounds}")
-            _render_trace(result.trace)
-            add_entry(prompt, result.answer, {
-                "generation_provider": gen_provider, "generation_model": gen_model,
-                "reflection_provider": rev_provider, "reflection_model": rev_model,
-                "rounds": result.rounds, "trace": result.trace,
-            })
-        except Exception as exc:
-            st.error(f"Request failed: {exc}")
-            if gen_provider == "openai" or rev_provider == "openai":
-                st.info("For OpenAI, set OPENAI_API_KEY in .env. For Ollama, ensure Ollama is running and the selected model is pulled.")
+    if st.button("▶ شروع تولید و بازبینی", type="primary", disabled=not prompt.strip(), use_container_width=True):
+        task = {
+            "status": "running", "started_at": time.time(), "events": [], "result": None,
+            "error": None, "cancel_event": threading.Event(), "prompt": prompt,
+            "gen_provider": gen_provider, "gen_model": gen_model,
+            "rev_provider": rev_provider, "rev_model": rev_model,
+            "max_rounds": max_rounds, "context_len": context_len,
+            "max_tokens": max_tokens, "saved": False,
+        }
+        st.session_state["reflectai_task"] = task
+        worker = threading.Thread(target=_run_task, args=(task, prompt, gen_provider, gen_model,
+            rev_provider, rev_model, max_rounds, context_len, max_tokens,
+            unload_after), daemon=True)
+        task["thread"] = worker
+        worker.start()
+        st.rerun()
+
+    _render_running_task()
+

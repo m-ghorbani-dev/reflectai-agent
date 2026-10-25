@@ -14,3 +14,6 @@ class SQLSafetyError(ReflectAIError, ValueError):
 
 class QueryTimeoutError(ReflectAIError, TimeoutError):
     """Raised when a SQL query exceeds its execution time budget."""
+
+class GenerationCancelled(ReflectAIError):
+    """Raised when a model response is cancelled by the user."""
