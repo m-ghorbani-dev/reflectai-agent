@@ -67,26 +67,79 @@ def _stop_ollama_service() -> tuple[bool, str]:
         return False, f'اجرای دستور توقف ممکن نشد: {exc}'
 
 
-def _render_resources() -> None:
+def render() -> None:
     st.title("مانیتور منابع و Ollama")
-    st.caption("پایش زندهٔ کم‌مصرف؛ اطلاعات هر ۲ ثانیه به‌روزرسانی می‌شوند. ابزارهای سخت‌افزاری فقط در صورت دسترس‌پذیری نمایش داده می‌شوند.")
-    st.caption(f"آخرین نمونه‌برداری: {time.strftime('%H:%M:%S')}")
-    if st.button("↻ خواندن دوبارهٔ وضعیت", type="primary", key="resources_manual_refresh"):
-        st.rerun()
-    metrics = read_system_metrics()
+    st.caption("نمایش زندهٔ مصرف منابع و وضعیت مدل‌ها. توقف پایش فقط به‌روزرسانی رابط را متوقف می‌کند.")
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        interval = st.selectbox("فاصلهٔ به‌روزرسانی", [1, 2, 5, 10], index=1, format_func=lambda x: f"{x} ثانیه")
+    with c2:
+        enabled = st.toggle("پایش زنده", value=st.session_state.get("resource_live_enabled", True), key="resource_live_enabled")
+    with c3:
+        if st.button("↻ به‌روزرسانی فوری", use_container_width=True):
+            st.rerun()
+
+    if not enabled:
+        st.info("پایش زنده متوقف است. برای ادامه، «پایش زنده» را روشن کن.")
+        metrics = read_system_metrics()
+        _render_metrics(metrics)
+        _render_ollama_status()
+        return
+
+    @st.fragment(run_every=f"{interval}s")
+    def live_panel():
+        metrics = read_system_metrics()
+        _render_metrics(metrics)
+        history = st.session_state.setdefault("resource_samples", [])
+        sample = {
+            "time": time.strftime("%H:%M:%S"),
+            "CPU": metrics.get("cpu_percent") or 0.0,
+            "RAM": metrics.get("ram_percent") or 0.0,
+            "GPU": (metrics.get("gpu") or {}).get("util"),
+            "VRAM": ((metrics.get("gpu") or {}).get("used_gb", 0) /
+                     max((metrics.get("gpu") or {}).get("total_gb", 0), 0.001) * 100)
+                    if metrics.get("gpu") else None,
+        }
+        history.append(sample)
+        del history[:-150]
+        st.markdown("### روند زندهٔ منابع · ۵ دقیقهٔ اخیر")
+        import pandas as pd
+        frame = pd.DataFrame(history)
+        fig = go.Figure()
+        for name in ("CPU", "RAM", "GPU", "VRAM"):
+            if name in frame and frame[name].notna().any():
+                fig.add_trace(go.Scatter(x=frame["time"], y=frame[name], mode="lines", name=name))
+        fig.update_layout(
+            height=300, margin=dict(l=10, r=10, t=20, b=10),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#edf2ff", yaxis=dict(range=[0, 100], title="استفاده (%)"),
+            xaxis_title="زمان", legend=dict(orientation="h", y=1.12),
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="live_resource_chart")
+        _render_ollama_status()
+
+    live_panel()
+
+
+def _render_metrics(metrics: dict) -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
         st.metric("RAM مصرف‌شده", f"{metrics['ram_used_gb']:.2f} GB", f"از {metrics['ram_total_gb']:.2f} GB")
-        st.progress(metrics['ram_percent'] / 100, text=f"{metrics['ram_percent']:.1f}%")
+        st.progress(max(0, min(100, metrics['ram_percent'])) / 100, text=f"{metrics['ram_percent']:.1f}%")
     with c2:
         cpu = metrics['cpu_percent']
         st.metric("CPU", f"{cpu:.1f}%" if cpu is not None else "ناموجود")
-        if cpu is not None: st.progress(max(0, min(100, cpu)) / 100)
+        if cpu is not None:
+            st.progress(max(0, min(100, cpu)) / 100)
     with c3:
         gpu = metrics['gpu']
-        st.metric("GPU", f"{gpu['util']:.0f}%" if gpu else "ناموجود", f"VRAM: {gpu['used_gb']:.2f}/{gpu['total_gb']:.2f} GB" if gpu else "nvidia-smi در دسترس نیست")
-        if gpu: st.progress(max(0, min(100, gpu['util'])) / 100)
+        st.metric("GPU", f"{gpu['util']:.0f}%" if gpu else "ناموجود",
+                  f"VRAM: {gpu['used_gb']:.2f}/{gpu['total_gb']:.2f} GB" if gpu else "nvidia-smi در دسترس نیست")
+        if gpu:
+            st.progress(max(0, min(100, gpu['util'])) / 100)
 
+
+def _render_ollama_status() -> None:
     st.markdown("### وضعیت Ollama")
     try:
         provider = OllamaProvider()
@@ -100,7 +153,7 @@ def _render_resources() -> None:
         with b:
             st.markdown("**مدل‌های بارگذاری‌شده در حافظه**")
             st.write(loaded or "مدلی در حافظه نیست.")
-        if st.button("🧹 تخلیهٔ مدل‌های بارگذاری‌شده", use_container_width=True):
+        if st.button("🧹 تخلیهٔ مدل‌های بارگذاری‌شده", use_container_width=True, key="resources_unload_models"):
             try:
                 names = provider.unload_all()
                 st.success(f"درخواست تخلیه برای {len(names)} مدل ارسال شد." if names else "مدلی برای تخلیه نبود.")
@@ -111,20 +164,8 @@ def _render_resources() -> None:
         st.error(f"اتصال به Ollama برقرار نیست: {exc}")
 
     st.markdown("### کنترل سرویس")
-    st.warning("توقف سرویس Ollama روی همهٔ برنامه‌های متصل به آن اثر می‌گذارد. اگر مدل دیگری از Ollama استفاده کند، آن هم قطع می‌شود.")
+    st.warning("توقف سرویس روی همهٔ برنامه‌های متصل به Ollama اثر می‌گذارد.")
     confirm = st.checkbox("تأیید می‌کنم که می‌خواهم خود سرویس Ollama را متوقف کنم.", key="confirm_stop_ollama_service")
     if st.button("⏻ توقف سرویس Ollama", disabled=not confirm, type="secondary", use_container_width=True):
         ok, message = _stop_ollama_service()
         (st.success if ok else st.error)(message)
-
-    st.markdown("### نحوهٔ خواندن شاخص‌ها")
-    st.caption("RAM و CPU از اطلاعات لینوکس خوانده می‌شوند. GPU/VRAM فقط با nvidia-smi و درایور سازگار نمایش داده می‌شود. این صفحه خودکار و پرتکرار refresh نمی‌شود تا مصرف منابع اضافی ایجاد نکند.")
-
-
-@st.fragment(run_every="2s")
-def _resources_live_fragment() -> None:
-    _render_resources()
-
-
-def render() -> None:
-    _resources_live_fragment()

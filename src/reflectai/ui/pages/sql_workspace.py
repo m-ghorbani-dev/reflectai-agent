@@ -8,9 +8,9 @@ from reflectai.tools.sql_executor import execute_read_only
 from reflectai.tools.chart_executor import build_chart
 
 
-def _render_sql_workspace() -> None:
+def render() -> None:
     st.title("فضای کاری SQLite")
-    st.caption(f"ساختار و وضعیت فایل هر ۵ ثانیه تازه می‌شود · آخرین بررسی: {__import__('time').strftime('%H:%M:%S')}")
+    st.caption("ساختار پایگاه داده را بررسی کن، کوئری فقط‌خواندنی اجرا کن و نتایج را بصری‌سازی کن.")
     db_path = st.text_input("مسیر فایل SQLite", placeholder="/path/to/database.db", key="rai_sql_db_path")
     if not db_path.strip():
         st.info("برای شروع، مسیر یک فایل SQLite محلی را وارد کن.")
@@ -78,12 +78,3 @@ def _render_sql_workspace() -> None:
                 st.info("برای نمودار، کوئری باید داده و دست‌کم یک ستون برگرداند.")
         with tab_query:
             st.code(st.session_state.get("reflectai_sql_query_text", query), language="sql")
-
-
-@st.fragment(run_every="5s")
-def _sql_live_fragment() -> None:
-    _render_sql_workspace()
-
-
-def render() -> None:
-    _sql_live_fragment()

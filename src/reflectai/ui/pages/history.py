@@ -5,9 +5,9 @@ import streamlit as st
 from reflectai.storage.history import get_history, clear_history
 
 
-def _render_history() -> None:
+def render() -> None:
     st.title("تاریخچهٔ مکالمات")
-    st.caption(f"تاریخچه هر ۵ ثانیه تازه می‌شود · آخرین بررسی: {__import__('time').strftime('%H:%M:%S')}")
+    st.caption("پاسخ‌ها به‌صورت محلی در پروژه ذخیره می‌شوند.")
     entries = list(reversed(get_history()))
     if not entries:
         st.info("هنوز پاسخی ذخیره نشده است.")
@@ -55,18 +55,6 @@ def _render_history() -> None:
             st.markdown(prompt)
             st.markdown("**پاسخ نهایی**")
             st.markdown(entry.get("answer", ""))
-            answer_file = metadata.get("answer_file")
-            if answer_file:
-                answer_path = Path(answer_file).resolve()
-                answers_dir = (Path(__file__).resolve().parents[4] / "data" / "answers").resolve()
-                if answers_dir in answer_path.parents and answer_path.is_file():
-                    st.download_button(
-                        "⬇ دانلود فایل پاسخ نهایی",
-                        data=answer_path.read_bytes(),
-                        file_name=answer_path.name,
-                        mime="text/markdown",
-                        key=f"history_answer_download_{index}",
-                    )
             trace = metadata.get("trace") or []
             if trace:
                 with st.expander("مشاهدهٔ Reflection Trace"):
@@ -78,12 +66,3 @@ def _render_history() -> None:
                             if step.get("response") is not None:
                                 st.markdown("**پاسخ**")
                                 st.code(step["response"], language="text")
-
-
-@st.fragment(run_every="5s")
-def _history_live_fragment() -> None:
-    _render_history()
-
-
-def render() -> None:
-    _history_live_fragment()

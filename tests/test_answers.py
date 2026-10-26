@@ -1,18 +1,14 @@
 from pathlib import Path
 
-from reflectai.storage import answers
-
-
-def test_save_final_answer_creates_markdown_with_prompt_and_answer(tmp_path, monkeypatch):
-    monkeypatch.setattr(answers, "ROOT_DIR", tmp_path)
-    path = answers.save_final_answer(
-        "Explain context length",
-        "Context length controls the token window.",
-        {"generation_model": "llama3.2", "rounds": 1},
-    )
-    assert path.is_file()
-    assert path.suffix == ".md"
+def test_save_answer_creates_markdown(tmp_path, monkeypatch):
+    from reflectai.storage import answers
+    monkeypatch.setattr(answers, "ANSWERS_DIR", tmp_path)
+    path = answers.save_answer("Test prompt", "Final response", {
+        "generation_model": "test-gen", "reflection_model": "test-ref", "rounds": 2,
+        "duration_seconds": 1.25,
+    })
+    assert path.exists()
     content = path.read_text(encoding="utf-8")
-    assert "Explain context length" in content
-    assert "Context length controls the token window." in content
-    assert "llama3.2" in content
+    assert "Test prompt" in content
+    assert "Final response" in content
+    assert "test-gen" in content
