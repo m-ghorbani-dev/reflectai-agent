@@ -4,16 +4,20 @@ from ..providers.registry import generate
 
 _APPROVAL_MARKERS = ("APPROVED", "NO CHANGES NEEDED", "READY AS IS")
 
-def evaluate_draft(prompt: str, draft: str, provider: str, model: str, trace: list | None = None, progress_callback=None) -> Review:
+
+def evaluate_draft(prompt: str, draft: str, provider: str, model: str, trace: list | None = None,
+                   progress_callback=None, context_len: int = 4096, max_tokens: int = 1024,
+                   cancel_event=None, unload_after: bool = False) -> Review:
     system = "You are a rigorous, constructive reviewer. Evaluate the draft, not the user."
     review_prompt = (
         "Review the draft against the request. Identify correctness issues, missing requirements, ambiguity, and concrete improvements. "
-        "If no material improvement is needed, begin your response with exactly 'APPROVED:'. Do not invent facts.\\n\\n"
-        f"REQUEST:\\n{prompt}\\n\\nDRAFT:\\n{draft}"
+        "If no material improvement is needed, begin your response with exactly 'APPROVED:'. Do not invent facts.\n\n"
+        f"REQUEST:\n{prompt}\n\nDRAFT:\n{draft}"
     )
     if progress_callback:
         progress_callback({"event": "start", "stage": "reflection", "round": 0, "provider": provider, "model": model, "prompt": review_prompt, "system_prompt": system})
-    text = generate(provider, model, review_prompt, system).strip()
+    text = generate(provider, model, review_prompt, system, context_len=context_len,
+                    max_tokens=max_tokens, cancel_event=cancel_event, unload_after=unload_after).strip()
     if trace is not None:
         trace.append({"stage": "reflection", "provider": provider, "model": model,
                       "system_prompt": system, "prompt": review_prompt, "response": text})

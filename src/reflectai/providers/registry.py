@@ -37,11 +37,16 @@ def list_models(provider: str) -> list[str]:
         return make_provider(provider).list_models()
     return []
 
-def generate(provider: str, model: str, prompt: str, system: str | None = None) -> str:
+def generate(provider: str, model: str, prompt: str, system: str | None = None,
+             context_len: int = 4096, max_tokens: int = 1024, cancel_event=None,
+             unload_after: bool = False) -> str:
     if not model or not model.strip():
         raise ConfigurationError("Model name cannot be empty")
     try:
-        result = make_provider(provider).generate(prompt=prompt, model=model.strip(), system=system)
+        result = make_provider(provider).generate(
+            prompt=prompt, model=model.strip(), system=system, context_len=context_len,
+            max_tokens=max_tokens, cancel_event=cancel_event, unload_after=unload_after,
+        )
         if not isinstance(result, str) or not result.strip():
             raise ProviderError(f"Provider '{provider}' returned an empty response")
         record_usage(provider, "success")
@@ -50,14 +55,3 @@ def generate(provider: str, model: str, prompt: str, system: str | None = None) 
         record_usage(provider, "error")
         logger.exception("Model request failed for provider=%s model=%s", provider, model)
         raise
-
-
-def unload_ollama_models() -> list[str]:
-    """Unload every currently running Ollama model and return names unloaded."""
-    provider = make_provider("ollama")
-    models = provider.running_models()
-    unloaded = []
-    for model in models:
-        provider.unload_model(model)
-        unloaded.append(model)
-    return unloaded
