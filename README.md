@@ -2,6 +2,40 @@
 
 **A local-first, multi-provider AI assistant with reflection and data-analysis tools.**
 
+## Screenshots
+
+ReflectAI provides a dark-themed interface for interacting with AI models, reviewing responses, monitoring system resources, and configuring model providers.
+
+### Dashboard
+
+The overview dashboard displays model status, recent activity, and system resource usage.
+
+![ReflectAI Dashboard](assets/dashboard.png)
+
+### Chat Interface
+
+Select separate generation and review models, configure inference parameters, and submit prompts through the chat interface.
+
+![ReflectAI Chat Interface](assets/chat-interface.png)
+
+### Resource Monitoring
+
+Monitor CPU, RAM, GPU, and VRAM usage while local models are running.
+
+![ReflectAI Resource Monitor](assets/resource-monitor.png)
+
+### Model Settings
+
+Configure model providers, default models, and inference settings.
+
+![ReflectAI Model Settings](assets/model-settings.png)
+
+### Live Execution
+
+Inspect the stages of generation, review, and response refinement.
+
+![ReflectAI Live Execution](assets/live-execution.png)
+
 ReflectAI is a Python application that generates an answer with an AI model, optionally reviews and revises that answer with a separately selected model, and provides a SQLite workspace for read-only queries and data visualization. The application uses Streamlit for its graphical interface and supports Ollama and OpenAI-compatible APIs.
 
 ## Features
